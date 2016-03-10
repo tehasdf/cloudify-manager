@@ -22,6 +22,10 @@ from testenv.utils import get_resource as resource
 from testenv.utils import deploy_application as deploy
 from testenv.utils import tar_blueprint
 
+blueprints_base_path = 'dsl/deployment_update'
+predicted_relationship_type = 'my_custom_relationship_type'
+predicted_node_type = 'my_custom_node_type'
+
 
 class TestDeploymentUpdate(TestCase):
 
@@ -48,11 +52,12 @@ class TestDeploymentUpdate(TestCase):
           all related operations were executed as well
         """
         initial_blueprint_path = \
-            resource('dsl/deployment_update/dep_up_initial.yaml')
+            resource(os.path.join(blueprints_base_path, 'dep_up_initial.yaml'))
         deployment, _ = deploy(initial_blueprint_path)
 
         new_blueprint_path = \
-            resource('dsl/deployment_update/dep_up_add_node.yaml')
+            resource(os.path.join(blueprints_base_path,
+                                  'dep_up_add_node_and_relationship.yaml'))
 
         tempdir = tempfile.mkdtemp()
         try:
@@ -91,14 +96,19 @@ class TestDeploymentUpdate(TestCase):
             # assert that node has a relationship
             node = added_nodes[0]
             self.assertEquals(1, len(node.relationships))
-            self._assert_relationship_exists(node.relationships,
-                                             target='server')
+            self._assert_relationship_exists(
+                    node.relationships,
+                    target='server',
+                    expected_type=predicted_relationship_type)
+            self.assertEquals(node.type, predicted_node_type)
 
             # assert that node instance has a relationship
             added_instance = added_instances[0]
             self.assertEquals(1, len(added_instance.relationships))
-            self._assert_relationship_exists(added_instance.relationships,
-                                             target='server')
+            self._assert_relationship_exists(
+                 added_instance.relationships,
+                 target='server',
+                 expected_type=predicted_relationship_type)
 
             # assert all operations in 'update' ('install') workflow
             # are executed by making them increment a runtime property
@@ -107,10 +117,10 @@ class TestDeploymentUpdate(TestCase):
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
 
-    def test_add_node_bp(self):
+    def test_add_nodes_and_relationship_type_bp(self):
         self._test_add_node()
 
-    def test_add_node_archive(self):
+    def test_add_nodes_and_relationship_type_archive(self):
         self._test_add_node(archive_mode=True)
 
     def _assert_relationship_exists(self, relationships, target,
