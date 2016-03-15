@@ -1,0 +1,36 @@
+tosca_definitions_version: 'cloudify_dsl_1_2'
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/3.4m1/types.yaml
+
+description: >
+  Micro web sites hosting.
+
+relationships:                            # New relationship type
+  new_relationship_type:
+    derived_from: cloudify.relationships.contained_in
+    source_interfaces:
+      cloudify.interfaces.relationship_lifecycle:
+        preconfigure: scripts/increment.sh
+        establish: scripts/increment.sh
+        postconfigure: scripts/increment.sh
+
+node_templates:
+  server:
+    type: cloudify.nodes.Compute
+
+  old_site:
+    type: cloudify.nodes.WebServer
+    properties:
+      port:
+        description: port
+        type: integer
+        default: 8081
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create: scripts/increment.sh
+        configure: scripts/increment.sh
+        start: scripts/increment.sh
+    relationships:
+      - type: new_relationship_type # New relationship instance
+        target: server

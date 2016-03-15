@@ -1,7 +1,6 @@
 tosca_definitions_version: 'cloudify_dsl_1_2'
 
 imports:
-#  - http://www.getcloudify.org/spec/cloudify/3.4m1/types.yaml
   - cloudify/types/types.yaml
 
 description: >
@@ -10,3 +9,11 @@ description: >
 node_templates:
   server:
     type: cloudify.nodes.Compute
+
+  old_site:
+    type: cloudify.nodes.Compute
+#    interfaces:
+#      cloudify.interfaces.lifecycle:
+#        create: scripts/increment.sh # resource already exists
+#        configure: scripts/increment.sh
+#        start: scripts/increment.sh

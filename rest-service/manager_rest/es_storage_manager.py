@@ -428,9 +428,12 @@ class ESStorageManager(object):
 
     def update_node(self, deployment_id, node_id,
                     number_of_instances=None,
-                    planned_number_of_instances=None):
+                    planned_number_of_instances=None,
+                    altered_node=None):
         storage_node_id = self._storage_node_id(deployment_id, node_id)
         update_doc_data = {}
+        if altered_node is not None:
+            update_doc_data.update(altered_node.to_dict())
         if number_of_instances is not None:
             update_doc_data['number_of_instances'] = number_of_instances
         if planned_number_of_instances is not None:
@@ -443,6 +446,7 @@ class ESStorageManager(object):
                                     id=storage_node_id,
                                     body=update_doc,
                                     **MUTATE_PARAMS)
+            return update_doc_data
         except elasticsearch.exceptions.NotFoundError:
             raise manager_exceptions.NotFoundError(
                 "Node {0} not found".format(node_id))

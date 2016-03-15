@@ -23,8 +23,6 @@ from testenv.utils import deploy_application as deploy
 from testenv.utils import tar_blueprint
 
 blueprints_base_path = 'dsl/deployment_update'
-predicted_relationship_type = 'my_custom_relationship_type'
-predicted_node_type = 'my_custom_node_type'
 
 
 class TestDeploymentUpdate(TestCase):
@@ -51,13 +49,16 @@ class TestDeploymentUpdate(TestCase):
         - assert the 'update' workflow has been executed and
           all related operations were executed as well
         """
+        predicted_relationship_type = 'cloudify.relationships.contained_in'
+        predicted_node_type = 'new_node_type'
+
         initial_blueprint_path = \
             resource(os.path.join(blueprints_base_path, 'dep_up_initial.yaml'))
         deployment, _ = deploy(initial_blueprint_path)
 
         new_blueprint_path = \
             resource(os.path.join(blueprints_base_path,
-                                  'dep_up_add_node_and_relationship.yaml'))
+                                  'dep_up_add_node.yaml'))
 
         tempdir = tempfile.mkdtemp()
         try:
@@ -72,7 +73,7 @@ class TestDeploymentUpdate(TestCase):
                                                          new_blueprint_path)
             self.client.deployment_updates.add(dep_update.id,
                                                entity_type='node',
-                                               entity_id='site_1')
+                                               entity_id='new_site')
             self.client.deployment_updates.commit(dep_update.id)
 
             # assert that 'update' workflow was executed
@@ -84,10 +85,10 @@ class TestDeploymentUpdate(TestCase):
                               execution.error)
 
             added_nodes = self.client.nodes.list(deployment_id=deployment.id,
-                                                 node_id='site_1')
+                                                 node_id='new_site')
             added_instances = \
                 self.client.node_instances.list(deployment_id=deployment.id,
-                                                node_id='site_1')
+                                                node_id='new_site')
 
             # assert that node and node instance were added to storage
             self.assertEquals(1, len(added_nodes))
@@ -117,11 +118,77 @@ class TestDeploymentUpdate(TestCase):
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
 
-    def test_add_nodes_and_relationship_type_bp(self):
+    def _test_add_relationship(self, archive_mode=False):
+        predicted_relationship_type = 'new_relationship_type'
+
+        initial_blueprint_path = \
+            resource(os.path.join(blueprints_base_path, 'dep_up_initial.yaml'))
+        deployment, _ = deploy(initial_blueprint_path)
+
+        new_blueprint_path = \
+            resource(os.path.join(blueprints_base_path,
+                                  'dep_up_add_relationship.yaml'))
+
+        tempdir = tempfile.mkdtemp()
+        try:
+            if archive_mode:
+                tar_path = tar_blueprint(new_blueprint_path, tempdir)
+                dep_update = self.client.deployment_updates. \
+                    stage_archive(deployment.id, tar_path,
+                                  os.path.basename(new_blueprint_path))
+            else:
+                dep_update = \
+                    self.client.deployment_updates.stage(deployment.id,
+                                                         new_blueprint_path)
+            self.client.deployment_updates.add(
+                    dep_update.id,
+                    entity_type='node',
+                    entity_id='old_site.relationships.new_relationship_type')
+            self.client.deployment_updates.commit(dep_update.id)
+
+            # assert that 'update' workflow was executed
+            executions = \
+                self.client.executions.list(deployment_id=deployment.id,
+                                            workflow_id='update')
+            execution = self._wait_for_execution(executions[0])
+            self.assertEquals('terminated', execution['status'],
+                              execution.error)
+
+            affected_node_instances = \
+                self.client.node_instances.list(deployment_id=deployment.id,
+                                                node_id='old_site')
+
+            self.assertEquals(1, len(affected_node_instances),
+                              'There are {0} affected instances, when '
+                              'there should be {1}'
+                              .format(len(affected_node_instances), 1))
+            affected_node_instance = affected_node_instances[0]
+
+            # assert that a new relationship node was created
+            self.assertEquals(1, len(affected_node_instance.relationships))
+
+            self._assert_relationship_exists(
+                    affected_node_instances.relationships,
+                    target='server',
+                    expected_type=predicted_relationship_type)
+
+            # assert all operations in 'update' ('install') workflow
+            # are executed by making them increment a runtime property
+            self.assertDictContainsSubset(
+                    {'ops_counter': '6'},
+                    affected_node_instances['runtime_properties']
+            )
+        finally:
+            shutil.rmtree(tempdir, ignore_errors=True)
+
+    def test_add_node_bp(self):
         self._test_add_node()
 
-    def test_add_nodes_and_relationship_type_archive(self):
+    def test_add_nodes_archive(self):
         self._test_add_node(archive_mode=True)
+
+    def test_add_relationship_bp(self):
+        self._test_add_relationship()
 
     def _assert_relationship_exists(self, relationships, target,
                                     expected_type=None):
