@@ -142,7 +142,7 @@ class TestDeploymentUpdate(TestCase):
                                                          new_blueprint_path)
             self.client.deployment_updates.add(
                     dep_update.id,
-                    entity_type='node',
+                    entity_type='relationship',
                     entity_id='old_site.relationships.new_relationship_type')
             self.client.deployment_updates.commit(dep_update.id)
 

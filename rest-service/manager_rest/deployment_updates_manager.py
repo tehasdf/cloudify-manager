@@ -91,7 +91,7 @@ class DeploymentUpdateManager(object):
             )
 
     @staticmethod
-    def _validate_entity_id(blueprint, entity_type, entity_id):
+    def _validate_entity_id(blueprint, entity_type, entity_id, key=None):
         """
         validate an entity id of provided type exists in provided blueprint.
         raises error if id doesn't exist
@@ -100,25 +100,23 @@ class DeploymentUpdateManager(object):
         :param entity_id: id of the entity, e.g. 'node1'
         """
         entity_type_plural = _pluralize(entity_type)
-        entity_id_list = entity_id.split('.')
-        entity_ids = [e['id'] for e in blueprint[entity_type_plural]]
+        if key:
+            entity_ids = [e[key] for e in blueprint[entity_type_plural]]
+        else:
+            entity_ids = [e for e in blueprint[entity_type_plural]]
 
-        def check_valid_id(sub_bp, remaining_keys):
+        if not any(filter(lambda e: e in entity_id, entity_ids)):
+            raise manager_exceptions.UnknownModificationStageError(
+                    "entity id {} doesn't exist".format(entity_id))
 
-            if len(remaining_keys) is 0 or \
-                            '.'.join(remaining_keys) in sub_bp:
-                return
-
-            next_sub_bp = sub_bp.get(remaining_keys[0])
-
-            if next_sub_bp:
-                return check_valid_id(next_sub_bp, remaining_keys[1:])
-            else:
-                raise manager_exceptions.UnknownModificationStageError(
-                        "entity id {} doesn't exist".format(entity_id))
-
-        if entity_id_list[0] in entity_ids:
-            return check_valid_id(blueprint, entity_id_list[1:])
+    @staticmethod
+    def _process_deployment_update_step_node(deployment_id, step, blueprint):
+        if step.operation == 'add' and step.entity_type == 'node':
+            get_blueprints_manager() \
+                ._create_deployment_nodes(deployment_id=deployment_id,
+                                          blueprint_id='N/A',
+                                          plan=blueprint,
+                                          node_ids=step.entity_id)
 
     def commit_deployment_update(self, deployment_update_id):
         deployment_update = self.sm.get_deployment_update(deployment_update_id)
@@ -131,44 +129,35 @@ class DeploymentUpdateManager(object):
         blueprint = deployment_update.blueprint
 
         deployment_id_filter = {'deployment_id': deployment_id}
-        # Updating the modified nodes onto ES.
+
+        modified_nodes = []
+
+        # Updating the modified nodes onto storage.
         for step in deployment_update.steps:
-            if step.operation == 'add' and step.entity_type == 'node':
-                node_id = step.entity_id.split('.')[0]
-                pluralized_entity_type = _pluralize(step.entity_type)
-                new_raw_node = [n for n in blueprint[pluralized_entity_type]
-                                if n['id'] == node_id][0]
+            if step.operation == 'add':
+                if step.entity_type == 'node':
+                    self._process_deployment_update_step_node(deployment_id,
+                                                              step,
+                                                              blueprint)
+                elif step.entity_type == 'relationship':
+                    node_id = step.entity_id.split('.')[0]
+                    pluralized_entity_type = _pluralize(step.entity_type)
+                    modified_raw_nodes = \
+                        [n for n in blueprint[pluralized_entity_type]
+                         if n['id'] == node_id]
 
-                altered_node = models.DeploymentNode(
-                        id=new_raw_node['name'],
-                        deployment_id=deployment_id,
-                        blueprint_id='~~~',
-                        type=new_raw_node['type'],
-                        type_hierarchy=new_raw_node['type_hierarchy'],
-                        number_of_instances=1,
-                        planned_number_of_instances=0,
-                        deploy_number_of_instances=0,
-                        host_id=new_raw_node.get('host_id', None),
-                        properties=new_raw_node['properties'],
-                        operations=new_raw_node['operations'],
-                        plugins=new_raw_node['plugins'],
-                        relationships=get_blueprints_manager().
-                                _prepare_node_relationships(new_raw_node),
-                        plugins_to_install=new_raw_node.get(
-                            'plugins_to_install')
-                )
+                    for node in modified_raw_nodes:
 
-                if self.sm.get_node(deployment_id, altered_node['id']):
-                    self.sm.update_node(deployment_id=deployment_id,
-                                        node_id=node_id,
-                                        altered_node=altered_node)
-                else:
-                    self.sm.put_node(altered_node)
+                        change = {
+                            'relationships': node['relationships']
+                        }
 
-        modified_nodes = [(step, self.sm.manage_update_step(deployment_id,
-                                                            step,
-                                                            blueprint))
-                          for step in deployment_update.steps if step]
+                        self.sm.update_node(deployment_id=deployment_id,
+                                            node_id=node_id,
+                                            changes=change)
+
+                        updated_node = self.sm.get_node(deployment_id, node_id)
+                        modified_nodes.append(updated_node)
 
         node_instances = \
             [instance.to_dict() for instance in
