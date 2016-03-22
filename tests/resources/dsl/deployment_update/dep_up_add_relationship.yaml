@@ -14,6 +14,11 @@ relationships:                            # New relationship type
         preconfigure: scripts/increment.sh
         postconfigure: scripts/increment.sh
         establish: scripts/increment.sh
+    target_interfaces:
+      cloudify.interfaces.relationship_lifecycle:
+        preconfigure: scripts/remote_increment.sh
+        postconfigure: scripts/remote_increment.sh
+        establish: scripts/remote_increment.sh
 
 node_templates:
   server:

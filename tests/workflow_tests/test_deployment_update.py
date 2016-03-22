@@ -175,13 +175,14 @@ class TestDeploymentUpdate(TestCase):
             execution = self._wait_for_execution(executions[0])
             self.assertEquals('terminated', execution['status'],
                               execution.error)
-            new_server = self.client.nodes.get(deployment_id=deployment.id,
-                                               node_id='server')
-            new_server_instances = \
+            related_node = \
+                self.client.nodes.get(deployment_id=deployment.id,
+                                      node_id='server')
+            related_node_instances = \
                 self.client.node_instances.list(deployment_id=deployment.id,
                                                 node_id='server')
-            self.assertEqual(len(new_server_instances), 1)
-            new_server_instance = new_server_instances[0]
+            self.assertEqual(len(related_node_instances), 1)
+            related_node_instance = related_node_instances[0]
 
             affected_node = self.client.nodes.get(deployment_id=deployment.id,
                                                   node_id='old_site')
@@ -191,11 +192,13 @@ class TestDeploymentUpdate(TestCase):
             self.assertEqual(len(affected_node_instances), 1)
             affected_node_instance = affected_node_instances[0]
 
+            # Assert nodes are very similar
             self.assert_equal_objects(old_server,
-                                      new_server,
+                                      related_node,
                                       exceptions=('relationships', 'plugins'))
             self.assert_equal_objects(old_server_instance,
-                                      new_server_instance)
+                                      related_node_instance,
+                                      exceptions='runtime_properties')
             self.assert_equal_objects(old_site,
                                       affected_node,
                                       exceptions=('relationships', 'plugins'))
@@ -216,8 +219,17 @@ class TestDeploymentUpdate(TestCase):
             # assert all operations in 'update' ('install') workflow
             # are executed by making them increment a runtime property
             self.assertDictContainsSubset(
-                    {'ops_counter': '3'},
+                    {'source_ops_counter': '3'},
                     affected_node_instance['runtime_properties']
+            )
+
+            # self.assertDictContainsSubset(
+            #         {'target_ops_counter': '6'},
+            #         related_node_instance['runtime_properties']
+            # )
+            self.assertDictContainsSubset(
+                    {'remote_ops_counter': '3'},
+                    related_node_instance['runtime_properties']
             )
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
