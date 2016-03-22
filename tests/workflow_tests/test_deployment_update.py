@@ -118,16 +118,38 @@ class TestDeploymentUpdate(TestCase):
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
 
+    @staticmethod
+    def assert_equal_objects(d1, d2, exceptions=()):
+        for k, v in d1.iteritems():
+            if cmp(d2[k], v) != 0 and k not in exceptions:
+                raise Exception('The nodes differed on {0}. {1}!={2}'
+                                .format(k, d1[k], d2[k]))
+
     def _test_add_relationship(self, archive_mode=False):
         predicted_relationship_type = 'new_relationship_type'
 
         initial_blueprint_path = \
             resource(os.path.join(blueprints_base_path, 'dep_up_initial.yaml'))
         deployment, _ = deploy(initial_blueprint_path)
-
         new_blueprint_path = \
             resource(os.path.join(blueprints_base_path,
                                   'dep_up_add_relationship.yaml'))
+
+        old_server = self.client.nodes.get(deployment_id=deployment.id,
+                                           node_id='server')
+        old_server_instances = \
+            self.client.node_instances.list(deployment_id=deployment.id,
+                                            node_id='server')
+        self.assertEqual(len(old_server_instances), 1)
+        old_server_instance = old_server_instances[0]
+
+        old_site = self.client.nodes.get(deployment_id=deployment.id,
+                                         node_id='old_site')
+        old_site_instances = \
+            self.client.node_instances.list(deployment_id=deployment.id,
+                                            node_id='old_site')
+        self.assertEqual(len(old_site_instances), 1)
+        old_site_instance = old_site_instances[0]
 
         tempdir = tempfile.mkdtemp()
         try:
@@ -143,7 +165,7 @@ class TestDeploymentUpdate(TestCase):
             self.client.deployment_updates.add(
                     dep_update.id,
                     entity_type='relationship',
-                    entity_id='old_site.relationships.new_relationship_type')
+                    entity_id='old_site:server')
             self.client.deployment_updates.commit(dep_update.id)
 
             # assert that 'update' workflow was executed
@@ -153,30 +175,49 @@ class TestDeploymentUpdate(TestCase):
             execution = self._wait_for_execution(executions[0])
             self.assertEquals('terminated', execution['status'],
                               execution.error)
+            new_server = self.client.nodes.get(deployment_id=deployment.id,
+                                               node_id='server')
+            new_server_instances = \
+                self.client.node_instances.list(deployment_id=deployment.id,
+                                                node_id='server')
+            self.assertEqual(len(new_server_instances), 1)
+            new_server_instance = new_server_instances[0]
 
+            affected_node = self.client.nodes.get(deployment_id=deployment.id,
+                                                  node_id='old_site')
             affected_node_instances = \
                 self.client.node_instances.list(deployment_id=deployment.id,
                                                 node_id='old_site')
-
-            self.assertEquals(1, len(affected_node_instances),
-                              'There are {0} affected instances, when '
-                              'there should be {1}'
-                              .format(len(affected_node_instances), 1))
+            self.assertEqual(len(affected_node_instances), 1)
             affected_node_instance = affected_node_instances[0]
+
+            self.assert_equal_objects(old_server,
+                                      new_server,
+                                      exceptions=('relationships', 'plugins'))
+            self.assert_equal_objects(old_server_instance,
+                                      new_server_instance)
+            self.assert_equal_objects(old_site,
+                                      affected_node,
+                                      exceptions=('relationships', 'plugins'))
+            self.assert_equal_objects(old_site_instance,
+                                      affected_node_instance,
+                                      exceptions=('relationships',
+                                                  'runtime_properties'))
+            # TODO: runtime_properties should be assert more thoroughly
 
             # assert that a new relationship node was created
             self.assertEquals(1, len(affected_node_instance.relationships))
 
             self._assert_relationship_exists(
-                    affected_node_instances.relationships,
+                    affected_node_instance['relationships'],
                     target='server',
                     expected_type=predicted_relationship_type)
 
             # assert all operations in 'update' ('install') workflow
             # are executed by making them increment a runtime property
             self.assertDictContainsSubset(
-                    {'ops_counter': '6'},
-                    affected_node_instances['runtime_properties']
+                    {'ops_counter': '3'},
+                    affected_node_instance['runtime_properties']
             )
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)

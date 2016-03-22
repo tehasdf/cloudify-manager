@@ -12,8 +12,3 @@ node_templates:
 
   old_site:
     type: cloudify.nodes.Compute
-#    interfaces:
-#      cloudify.interfaces.lifecycle:
-#        create: scripts/increment.sh # resource already exists
-#        configure: scripts/increment.sh
-#        start: scripts/increment.sh
