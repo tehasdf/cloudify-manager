@@ -164,13 +164,11 @@ class DeploymentUpdateManager(object):
                                        previous_node_instances=node_instances,
                                        modified_nodes=())
 
-    def _update_node_instnces(self, dep_update, changes):
+    def _apply_node_instance_adding(self, instances, dep_update):
         added_raw_instances = []
         added_related_raw_instances = []
-        modified_raw_instances = []
 
-        # act on changes, which are either new instances or new relationships
-        for node_instance in changes['added_and_related']:
+        for node_instance in instances:
             if node_instance.get('modification') == 'added':
                 added_raw_instances.append(node_instance)
             else:
@@ -188,41 +186,69 @@ class DeploymentUpdateManager(object):
                         state=None,
                         runtime_properties=None))
 
-        # create added instances
         get_blueprints_manager()._create_deployment_node_instances(
                 dep_update.deployment_id,
                 added_raw_instances
         )
-        for node_instance in changes['modified_and_related']:
-            modified_raw_instances.append(node_instance)
-            current = self.sm.get_node_instance(node_instance['id'])
-            new_relationships = current.relationships
-            new_relationships += node_instance['relationships']
-            self.sm.update_node_instance(models.DeploymentNodeInstance(
-                    id=node_instance['id'],
-                    relationships=new_relationships,
-                    version=current.version,
-                    node_id=None,
-                    host_id=None,
-                    deployment_id=None,
-                    state=None,
-                    runtime_properties=None))
 
         return {
-            'added_raw_instances': added_raw_instances,
-            'add_related_raw_instances': added_related_raw_instances,
-            'modified_raw_instances': modified_raw_instances
+            'affected': added_raw_instances,
+            'related': added_related_raw_instances
         }
 
-    def _execute_update_workflow(self, dep_update, raw_node_instances):
+    def _apply_node_instnce_modifying(self, instances, dep_update):
+        modified_raw_instances = []
+        modify_related_raw_instances = []
+
+        for node_instance in instances:
+            if node_instance.get('modification') == 'modified':
+                modified_raw_instances.append(node_instance)
+                current = self.sm.get_node_instance(node_instance['id'])
+                new_relationships = current.relationships
+                new_relationships += node_instance['relationships']
+                self.sm.update_node_instance(models.DeploymentNodeInstance(
+                        id=node_instance['id'],
+                        relationships=new_relationships,
+                        version=current.version,
+                        node_id=None,
+                        host_id=None,
+                        deployment_id=None,
+                        state=None,
+                        runtime_properties=None))
+            else:
+                modify_related_raw_instances.append(node_instance)
+
+        return {
+            'affected': modified_raw_instances,
+            'related': modify_related_raw_instances
+        }
+
+    def _update_node_instnces(self, dep_update, updated_instances):
+        instance_update_mapper = {
+            'added_and_related':
+                self._apply_node_instance_adding,
+            'modified_and_related':
+                self._apply_node_instnce_modifying,
+        }
+
+        raw_instances = {k: {} for k, _ in instance_update_mapper.iteritems()}
+
+        for change_type, func in instance_update_mapper.iteritems():
+            if updated_instances[change_type]:
+                raw_instances[change_type] = \
+                    func(updated_instances[change_type], dep_update)
+
+        return raw_instances
+
+    def _execute_update_workflow(self, dep_update, node_instances):
 
         instance_ids = {
-            'added_instance_ids': _extract_node_ids(
-                    raw_node_instances['added_raw_instances']),
-            'add_related_instance_ids': _extract_node_ids(
-                    raw_node_instances['add_related_raw_instances']),
-            'modified_instance_ids': _extract_node_ids(
-                    raw_node_instances['modified_raw_instances']),
+            'added_instance_ids': _extract_node_instance_ids(
+                    node_instances['added_and_related'].get('affected')),
+            'add_related_instance_ids': _extract_node_instance_ids(
+                    node_instances['added_and_related'].get('related')),
+            'modified_instance_ids': _extract_node_instance_ids(
+                    node_instances['modified_and_related'].get('affected')),
             # TODO: support for different types should be added right here
             # 'modify_related_instance_ids': (),
             # 'removed_instance_ids': (),
@@ -323,8 +349,11 @@ def _pluralize(input):
     return '{}s'.format(input)
 
 
-def _extract_node_ids(raw_node_instances):
-    return [instance['id'] for instance in raw_node_instances]
+def _extract_node_instance_ids(raw_node_instances):
+    if raw_node_instances:
+        return [instance['id'] for instance in raw_node_instances]
+    else:
+        return []
 
 
 def _validate_relationship_entity_id(blueprint, entity_id):
