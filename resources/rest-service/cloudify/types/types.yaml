@@ -399,9 +399,15 @@ workflows:
     parameters:
       added_instance_ids:
         default: []
-      related_instance_ids:
+      add_related_instance_ids:
         default: []
       modified_instance_ids:
+        default: []
+      modify_related_instance_ids:
+        default: []
+      removed_instance_ids':
+        default: []
+      remove_related_instnce_ids:
         default: []
 
   uninstall: default_workflows.cloudify.plugins.workflows.uninstall

@@ -99,71 +99,72 @@ class DeploymentUpdateManager(object):
         :param entity_type: singular entity type name, e.g. 'node'
         :param entity_id: id of the entity, e.g. 'node1'
         """
-        error = manager_exceptions.UnknownModificationStageError(
-                "entity id {} doesn't exist".format(entity_id))
-
         validator = validation_mapper[entity_type]
 
         if validator(blueprint, entity_id):
             return
         else:
-            raise error
+            raise manager_exceptions.UnknownModificationStageError(
+                    "entity id {} doesn't exist".format(entity_id))
 
-    def commit_deployment_update(self, deployment_update_id):
-        deployment_update = self.sm.get_deployment_update(deployment_update_id)
+    @staticmethod
+    def _add_node(dep_update, entity_id):
+        get_blueprints_manager()._create_deployment_nodes(
+                deployment_id=dep_update.deployment_id,
+                blueprint_id='N/A',
+                plan=dep_update.blueprint,
+                node_ids=entity_id
+        )
 
-        # mark deployment update as committing
-        deployment_update.state = models.DeploymentUpdate.COMMITTING
-        self.sm.update_deployment_update(deployment_update)
+    def _add_relationship(self, dep_update, entity_id):
+        source_node = entity_id.split(':')[0]
+        pluralized_entity_type = _pluralize('node')
+        modified_raw_node = \
+            [n for n in dep_update.blueprint[pluralized_entity_type]
+             if n['id'] == source_node][0]
 
-        deployment_id = deployment_update.deployment_id
-        blueprint = deployment_update.blueprint
+        change = {
+            'relationships': modified_raw_node['relationships'],
+            'plugins': modified_raw_node['plugins']
+        }
 
-        deployment_id_filter = {'deployment_id': deployment_id}
+        self.sm.update_node(deployment_id=dep_update.deployment_id,
+                            node_id=source_node,
+                            changes=change)
 
-        modified_nodes = []
+    def _add_entity(self, dep_update, entity_type, entity_id):
 
-        # Updating the modified nodes onto storage.
-        for step in deployment_update.steps:
+        {
+            'node': self._add_node,
+            'relationship': self._add_relationship
+        }[entity_type](dep_update, entity_id)
+
+    def _update_nodes(self, dep_update):
+        for step in dep_update.steps:
             if step.operation == 'add':
-                if step.entity_type == 'node':
-                    get_blueprints_manager()._create_deployment_nodes(
-                            deployment_id=deployment_id,
-                            blueprint_id='N/A',
-                            plan=blueprint,
-                            node_ids=step.entity_id
-                    )
-                elif step.entity_type == 'relationship':
-                    source_node = step.entity_id.split(':')[0]
-                    pluralized_entity_type = _pluralize('node')
-                    modified_raw_node = \
-                        [n for n in blueprint[pluralized_entity_type]
-                         if n['id'] == source_node][0]
+                self._add_entity(dep_update,
+                                 step.entity_type,
+                                 step.entity_id)
 
-                    change = {
-                        'relationships': modified_raw_node['relationships'],
-                        'plugins': modified_raw_node['plugins']
-                    }
+    def _extract_changes(self, dep_update):
+        deployment_id_filter = \
+            {'deployment_id': dep_update.deployment_id}
 
-                    self.sm.update_node(deployment_id=deployment_id,
-                                        node_id=source_node,
-                                        changes=change)
-
-                    updated_node = self.sm.get_node(deployment_id, source_node)
-                    modified_nodes.append(updated_node)
-
+        # By this point the node_instances aren't updated yet
         node_instances = \
             [instance.to_dict() for instance in
              self.sm.get_node_instances(filters=deployment_id_filter).items]
 
+        # By this point the nodes should be updated
         nodes = [node.to_dict() for node in
                  self.sm.get_nodes(filters=deployment_id_filter).items]
 
         # project changes in deployment
-        changes = tasks.modify_deployment(
-            nodes=nodes,
-            previous_node_instances=node_instances,
-            modified_nodes=modified_nodes)
+        return tasks.modify_deployment(nodes=nodes,
+                                       previous_node_instances=node_instances,
+                                       modified_nodes=())
+
+    def _update_node_instnces(self, dep_update, changes):
         added_raw_instances = []
         added_related_raw_instances = []
         modified_raw_instances = []
@@ -178,22 +179,6 @@ class DeploymentUpdateManager(object):
                 new_relationships = current.relationships
                 new_relationships += node_instance['relationships']
                 self.sm.update_node_instance(models.DeploymentNodeInstance(
-                    id=node_instance['id'],
-                    relationships=new_relationships,
-                    version=current.version,
-                    node_id=None,
-                    host_id=None,
-                    deployment_id=None,
-                    state=None,
-                    runtime_properties=None))
-
-        for node_instance in changes['modified_and_related']:
-            if node_instance.get('modification') == 'modified':
-                modified_raw_instances.append(node_instance)
-                current = self.sm.get_node_instance(node_instance['id'])
-                new_relationships = current.relationships
-                new_relationships += node_instance['relationships']
-                self.sm.update_node_instance(models.DeploymentNodeInstance(
                         id=node_instance['id'],
                         relationships=new_relationships,
                         version=current.version,
@@ -204,33 +189,75 @@ class DeploymentUpdateManager(object):
                         runtime_properties=None))
 
         # create added instances
-        get_blueprints_manager().\
-            _create_deployment_node_instances(deployment_id,
-                                              added_raw_instances)
+        get_blueprints_manager()._create_deployment_node_instances(
+                dep_update.deployment_id,
+                added_raw_instances
+        )
+        for node_instance in changes['modified_and_related']:
+            modified_raw_instances.append(node_instance)
+            current = self.sm.get_node_instance(node_instance['id'])
+            new_relationships = current.relationships
+            new_relationships += node_instance['relationships']
+            self.sm.update_node_instance(models.DeploymentNodeInstance(
+                    id=node_instance['id'],
+                    relationships=new_relationships,
+                    version=current.version,
+                    node_id=None,
+                    host_id=None,
+                    deployment_id=None,
+                    state=None,
+                    runtime_properties=None))
 
-        # execute update workflow using added and related instances
-        added_instance_ids = \
-            [instance['id'] for instance in added_raw_instances]
-        related_instance_ids = \
-            [instance['id'] for instance in added_related_raw_instances]
-        modified_instance_ids = \
-            [instance['id'] for instance in modified_raw_instances]
-
-        instance_ids = {
-            'added_instance_ids': added_instance_ids,
-            'related_instance_ids': related_instance_ids,
-            'modified_instance_ids': modified_instance_ids
+        return {
+            'added_raw_instances': added_raw_instances,
+            'add_related_raw_instances': added_related_raw_instances,
+            'modified_raw_instances': modified_raw_instances
         }
 
-        self.execute_workflow(deployment_id=deployment_id,
+    def _execute_update_workflow(self, dep_update, raw_node_instances):
+
+        instance_ids = {
+            'added_instance_ids': _extract_node_ids(
+                    raw_node_instances['added_raw_instances']),
+            'add_related_instance_ids': _extract_node_ids(
+                    raw_node_instances['add_related_raw_instances']),
+            'modified_instance_ids': _extract_node_ids(
+                    raw_node_instances['modified_raw_instances']),
+            # TODO: support for different types should be added right here
+            # 'modify_related_instance_ids': (),
+            # 'removed_instance_ids': (),
+            # 'remove_related_instnce_ids': ()
+        }
+        self.execute_workflow(deployment_id=dep_update.deployment_id,
                               workflow_id='update',
                               parameters=instance_ids)
 
-        # mark deployment update as committed
-        deployment_update.state = models.DeploymentUpdate.COMMITTED
-        self.sm.update_deployment_update(deployment_update)
+    def commit_deployment_update(self, deployment_update_id):
+        dep_update = self.sm.get_deployment_update(deployment_update_id)
 
-        return models.DeploymentUpdate(deployment_id, blueprint)
+        # mark deployment update as committing
+        dep_update.state = models.DeploymentUpdate.COMMITTING
+        self.sm.update_deployment_update(dep_update)
+
+        # Update the nodes on the storage
+        self._update_nodes(dep_update)
+
+        # Extract changes from updated notes
+        changes = self._extract_changes(dep_update)
+
+        # Update node instances according to the changes
+        raw_node_instances = self._update_node_instnces(dep_update,
+                                                        changes)
+
+        # execute update workflow using added and related instances
+        self._execute_update_workflow(dep_update, raw_node_instances)
+
+        # mark deployment update as committed
+        dep_update.state = models.DeploymentUpdate.COMMITTED
+        self.sm.update_deployment_update(dep_update)
+
+        return models.DeploymentUpdate(deployment_update_id,
+                                       dep_update.blueprint)
 
     def execute_workflow(self, deployment_id, workflow_id,
                          parameters=None,
@@ -294,6 +321,10 @@ def get_deployment_updates_manager():
 
 def _pluralize(input):
     return '{}s'.format(input)
+
+
+def _extract_node_ids(raw_node_instances):
+    return [instance['id'] for instance in raw_node_instances]
 
 
 def _validate_relationship_entity_id(blueprint, entity_id):
