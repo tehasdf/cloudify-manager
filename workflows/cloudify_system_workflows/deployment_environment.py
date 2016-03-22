@@ -18,8 +18,9 @@ import os
 import shutil
 
 from cloudify.decorators import workflow
-from cloudify.workflows import tasks as workflow_tasks
 from cloudify.workflows import workflow_context
+
+from cloudify_system_workflows import ignore_tasks_on_fail_and_send_event
 
 
 def generate_create_dep_tasks_graph(ctx,
@@ -87,9 +88,7 @@ def delete(ctx,
             ctx.local_task(_delete_deployment_workdir,
                            kwargs={'deployment_id': ctx.deployment.id}))
 
-    for task in graph.tasks_iter():
-        _ignore_task_on_fail_and_send_event(task, ctx)
-
+    ignore_tasks_on_fail_and_send_event(graph, ctx)
     return graph.execute()
 
 
@@ -121,13 +120,6 @@ def delete_logs(ctx, deployment_id):
                 ctx.logger.exception(
                         'Failed removing rotated log file {0}.'.format(
                                 rotated_log_file_path, exc_info=True))
-
-
-def _ignore_task_on_fail_and_send_event(task, ctx):
-    def failure_handler(tsk):
-        ctx.send_event('Ignoring task {0} failure'.format(tsk.name))
-        return workflow_tasks.HandlerResult.ignore()
-    task.on_failure = failure_handler
 
 
 @workflow_context.task_config(send_task_events=False)

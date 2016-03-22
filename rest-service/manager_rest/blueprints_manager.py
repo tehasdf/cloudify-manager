@@ -16,6 +16,7 @@
 import uuid
 import traceback
 import os
+import shutil
 from datetime import datetime
 from StringIO import StringIO
 
@@ -24,8 +25,10 @@ from flask import current_app
 from dsl_parser import constants, functions, tasks
 from dsl_parser import exceptions as parser_exceptions
 from dsl_parser import utils as dsl_parser_utils
+
 from manager_rest import models
 from manager_rest import config
+from manager_rest import utils
 from manager_rest import manager_exceptions
 from manager_rest import storage_manager
 from manager_rest import workflow_client as wf_client
@@ -163,6 +166,70 @@ class BlueprintsManager(object):
             }
         )
         return execution
+
+    def install_plugin(self, plugin):
+        if utils.plugin_installable_on_current_platform(plugin):
+            self._execute_system_workflow(
+                wf_id='install_plugin',
+                task_mapping='cloudify_system_workflows.plugins.install',
+                execution_parameters={
+                    'plugin': {
+                        'name': plugin.package_name,
+                        'package_name': plugin.package_name,
+                        'package_version': plugin.package_version
+                    }
+                },
+                verify_no_executions=False,
+                timeout=300)
+
+    def remove_plugin(self, plugin_id, force, skip_uninstall=False):
+        # Verify plugin exists.
+        plugin = self.sm.get_plugin(plugin_id)
+
+        # Uninstall (if applicable)
+        if (not skip_uninstall and
+                utils.plugin_installable_on_current_platform(plugin)):
+            if not force:
+                used_blueprints = list(set(
+                    d.blueprint_id for d in
+                    self.deployments_list(include=['blueprint_id']).items))
+                plugins = [b.plan[constants.WORKFLOW_PLUGINS_TO_INSTALL] +
+                           b.plan[constants.DEPLOYMENT_PLUGINS_TO_INSTALL]
+                           for b in
+                           self.blueprints_list(include=['plan'],
+                                                filters={
+                                                    'id': used_blueprints
+                                                }).items]
+                plugins = set((p.get('package_name'), p.get('package_version'))
+                              for sublist in plugins for p in sublist)
+                if (plugin.package_name, plugin.package_version) in plugins:
+                    raise manager_exceptions.PluginInUseError(
+                        'Plugin {} is currently in use. You can "force" '
+                        'plugin removal.'.format(plugin.id))
+            # TODO: how should timeout be handled?
+            self._execute_system_workflow(
+                wf_id='uninstall_plugin',
+                task_mapping='cloudify_system_workflows.plugins.uninstall',
+                execution_parameters={
+                    'plugin': {
+                        'name': plugin.package_name,
+                        'package_name': plugin.package_name,
+                        'package_version': plugin.package_version,
+                        'wagon': True
+                    }
+                },
+                verify_no_executions=False,
+                timeout=300)
+
+        # Remove from storage
+        self.sm.delete_plugin(plugin.id)
+
+        # Remove from file system
+        archive_path = utils.get_plugin_archive_path(plugin_id,
+                                                     plugin.archive_name)
+        shutil.rmtree(os.path.dirname(archive_path), ignore_errors=True)
+
+        return plugin
 
     def publish_blueprint(self,
                           application_dir,

@@ -13,14 +13,20 @@
 #  * See the License for the specific language governing permissions and
 #  * limitations under the License.
 
+import os
 import sys
 import logging
 import shutil
 import importlib
 import traceback
 import StringIO
+import platform
 from os import path
+
+import wagon.utils
 from flask.ext.restful import abort
+
+from manager_rest import config
 
 
 def setup_logger(logger_name, logger_level=logging.DEBUG, handlers=None,
@@ -130,3 +136,21 @@ def abort_error(error, logger, hide_server_message=False):
           message=str(error),
           error_code=error.error_code,
           server_traceback=s_traceback.getvalue())
+
+
+def get_plugin_archive_path(plugin_id, archive_name):
+    return os.path.join(config.instance().file_server_uploaded_plugins_folder,
+                        plugin_id,
+                        archive_name)
+
+
+def plugin_installable_on_current_platform(plugin):
+    # TODO test
+    dist, _, release = platform.linux_distribution(
+            full_distribution_name=False)
+    dist, release = dist.lower(), release.lower()
+    return (plugin.supported_platform == 'any' or all([
+        plugin.supported_platform == wagon.utils.get_platform(),
+        plugin.distribution == dist,
+        plugin.distribution_release == release
+    ]))

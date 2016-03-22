@@ -324,3 +324,27 @@ class SnapshotActionError(ManagerException):
             *args,
             **kwargs
         )
+
+
+class PluginInUseError(ManagerException):
+    ERROR_CODE = 'plugin_in_use'
+
+    def __init__(self, *args, **kwargs):
+        super(PluginInUseError, self).__init__(
+            405,
+            PluginInUseError.ERROR_CODE,
+            *args,
+            **kwargs
+        )
+
+
+class PluginInstallationError(ManagerException):
+    ERROR_CODE = 'plugin_installation_error'
+
+    def __init__(self, *args, **kwargs):
+        super(PluginInstallationError, self).__init__(
+                400,
+                PluginInstallationError.ERROR_CODE,
+                *args,
+                **kwargs
+        )
