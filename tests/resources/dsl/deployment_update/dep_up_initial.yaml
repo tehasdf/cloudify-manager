@@ -6,9 +6,24 @@ imports:
 description: >
   Micro web sites hosting.
 
+relationships:                            # Old relationship type
+  old_relationship_type:
+    derived_from: cloudify.relationships.contained_in
+    source_interfaces:
+      cloudify.interfaces.relationship_lifecycle:
+        preconfigure: scripts/increment.sh
+        postconfigure: scripts/increment.sh
+        establish: scripts/increment.sh
+
 node_templates:
   server:
     type: cloudify.nodes.Compute
 
+  server2:
+    type: cloudify.nodes.Compute
+
   old_site:
     type: cloudify.nodes.Compute
+    relationships:
+      - type: old_relationship_type
+        target: server

@@ -403,6 +403,8 @@ workflows:
         default: []
       modified_instance_ids:
         default: []
+      modified_entity_ids:
+        default: []
       modify_related_instance_ids:
         default: []
 

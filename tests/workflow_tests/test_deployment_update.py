@@ -135,13 +135,13 @@ class TestDeploymentUpdate(TestCase):
             resource(os.path.join(blueprints_base_path,
                                   'dep_up_add_relationship.yaml'))
 
-        old_server = self.client.nodes.get(deployment_id=deployment.id,
-                                           node_id='server')
-        old_server_instances = \
+        old_server2 = self.client.nodes.get(deployment_id=deployment.id,
+                                            node_id='server2')
+        old_server2_instances = \
             self.client.node_instances.list(deployment_id=deployment.id,
-                                            node_id='server')
-        self.assertEqual(len(old_server_instances), 1)
-        old_server_instance = old_server_instances[0]
+                                            node_id='server2')
+        self.assertEqual(len(old_server2_instances), 1)
+        old_server2_instance = old_server2_instances[0]
 
         old_site = self.client.nodes.get(deployment_id=deployment.id,
                                          node_id='old_site')
@@ -150,6 +150,18 @@ class TestDeploymentUpdate(TestCase):
                                             node_id='old_site')
         self.assertEqual(len(old_site_instances), 1)
         old_site_instance = old_site_instances[0]
+
+        # Assert the site already holds one relationship
+        self.assertEquals(1, len(old_site_instance.relationships))
+
+        # Assert the site has source_ops before the commit
+        self.assertDictContainsSubset(
+                {'source_ops_counter': '3'},
+                old_site_instance['runtime_properties']
+        )
+
+        self.assertIsNone(old_server2_instance['runtime_properties']
+                          .get('target_ops_counter'))
 
         tempdir = tempfile.mkdtemp()
         try:
@@ -165,7 +177,8 @@ class TestDeploymentUpdate(TestCase):
             self.client.deployment_updates.add(
                     dep_update.id,
                     entity_type='relationship',
-                    entity_id='old_site:server')
+                    entity_id='old_site:server2')
+
             self.client.deployment_updates.commit(dep_update.id)
 
             # assert that 'update' workflow was executed
@@ -175,12 +188,13 @@ class TestDeploymentUpdate(TestCase):
             execution = self._wait_for_execution(executions[0])
             self.assertEquals('terminated', execution['status'],
                               execution.error)
+
             related_node = \
                 self.client.nodes.get(deployment_id=deployment.id,
-                                      node_id='server')
+                                      node_id='server2')
             related_node_instances = \
                 self.client.node_instances.list(deployment_id=deployment.id,
-                                                node_id='server')
+                                                node_id='server2')
             self.assertEqual(len(related_node_instances), 1)
             related_node_instance = related_node_instances[0]
 
@@ -193,10 +207,10 @@ class TestDeploymentUpdate(TestCase):
             affected_node_instance = affected_node_instances[0]
 
             # Assert nodes are very similar
-            self.assert_equal_objects(old_server,
+            self.assert_equal_objects(old_server2,
                                       related_node,
                                       exceptions=('relationships', 'plugins'))
-            self.assert_equal_objects(old_server_instance,
+            self.assert_equal_objects(old_server2_instance,
                                       related_node_instance,
                                       exceptions='runtime_properties')
             self.assert_equal_objects(old_site,
@@ -209,24 +223,24 @@ class TestDeploymentUpdate(TestCase):
             # TODO: runtime_properties should be assert more thoroughly
 
             # assert that a new relationship node was created
-            self.assertEquals(1, len(affected_node_instance.relationships))
+            self.assertEquals(2, len(affected_node_instance.relationships))
 
             self._assert_relationship_exists(
                     affected_node_instance['relationships'],
-                    target='server',
+                    target='server2',
                     expected_type=predicted_relationship_type)
 
             # assert all operations in 'update' ('install') workflow
             # are executed by making them increment a runtime property
+
+            # Assert the source site still ran the relationship lifecycle once
             self.assertDictContainsSubset(
                     {'source_ops_counter': '3'},
                     affected_node_instance['runtime_properties']
             )
 
-            # self.assertDictContainsSubset(
-            #         {'target_ops_counter': '6'},
-            #         related_node_instance['runtime_properties']
-            # )
+            # Assert that the destination of the new relationship ran all
+            # of the lifecycles
             self.assertDictContainsSubset(
                     {'remote_ops_counter': '3'},
                     related_node_instance['runtime_properties']

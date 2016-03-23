@@ -165,12 +165,20 @@ class DeploymentUpdateManager(object):
             'relationship': self._add_relationship
         }[entity_type](dep_update, entity_id)
 
+        return entity_id
+
     def _update_nodes(self, dep_update):
+        modified_entities = {
+            'node': [],
+            'relationship': []
+        }
         for step in dep_update.steps:
             if step.operation == 'add':
+                modified_entities[step.entity_type].append(step.entity_id)
                 self._add_entity(dep_update,
                                  step.entity_type,
                                  step.entity_id)
+        return modified_entities
 
     def _extract_changes(self, dep_update):
         deployment_id_filter = \
@@ -258,7 +266,10 @@ class DeploymentUpdateManager(object):
 
         return raw_instances
 
-    def _execute_update_workflow(self, dep_update, node_instances):
+    def _execute_update_workflow(self,
+                                 dep_update,
+                                 node_instances,
+                                 modified_entities):
 
         instance_ids = {
             'added_instance_ids': _extract_node_instance_ids(
@@ -267,6 +278,7 @@ class DeploymentUpdateManager(object):
                 node_instances['added_and_related'].get('related')),
             'modified_instance_ids': _extract_node_instance_ids(
                 node_instances['modified_and_related'].get('affected')),
+            'modified_entity_ids': modified_entities,
             'modify_related_instance_ids': _extract_node_instance_ids(
                 node_instances['modified_and_related'].get('related'))
             # TODO: support for different types should be added right here
@@ -285,17 +297,19 @@ class DeploymentUpdateManager(object):
         self.sm.update_deployment_update(dep_update)
 
         # Update the nodes on the storage
-        self._update_nodes(dep_update)
+        modified_entities = self._update_nodes(dep_update)
 
         # Extract changes from updated notes
         changes = self._extract_changes(dep_update)
 
         # Update node instances according to the changes
-        raw_node_instances = self._apply_entity_instance_adding(dep_update,
-                                                                changes)
+        raw_node_instances = \
+            self._apply_entity_instance_adding(dep_update, changes)
 
         # execute update workflow using added and related instances
-        self._execute_update_workflow(dep_update, raw_node_instances)
+        self._execute_update_workflow(dep_update,
+                                      raw_node_instances,
+                                      modified_entities)
 
         # mark deployment update as committed
         dep_update.state = models.DeploymentUpdate.COMMITTED
