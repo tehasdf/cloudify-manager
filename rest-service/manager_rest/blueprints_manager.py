@@ -473,6 +473,7 @@ class BlueprintsManager(object):
             policy_types=deployment_plan['policy_types'],
             policy_triggers=deployment_plan['policy_triggers'],
             groups=deployment_plan['groups'],
+            policies=deployment_plan['policies'],
             outputs=deployment_plan['outputs'])
 
         self.sm.put_deployment(deployment_id, new_deployment)
@@ -680,6 +681,7 @@ class BlueprintsManager(object):
         for node_instance in dsl_node_instances:
             instance_id = node_instance['id']
             node_id = node_instance['name']
+            scaling_groups = node_instance.get('scaling_groups', [])
             relationships = node_instance.get('relationships', [])
             host_id = node_instance.get('host_id')
             instance = models.DeploymentNodeInstance(
@@ -690,7 +692,8 @@ class BlueprintsManager(object):
                 deployment_id=deployment_id,
                 state='uninitialized',
                 runtime_properties={},
-                version=None)
+                version=None,
+                scaling_groups=scaling_groups)
             self.sm.put_node_instance(instance)
 
     def evaluate_deployment_outputs(self, deployment_id):
@@ -743,16 +746,18 @@ class BlueprintsManager(object):
 
     def _create_deployment_nodes(self, blueprint_id, deployment_id, plan):
         for raw_node in plan['nodes']:
-            num_instances = raw_node['instances']['deploy']
+            scalable = raw_node['capabilities']['scalable']['properties']
             self.sm.put_node(models.DeploymentNode(
                 id=raw_node['name'],
                 deployment_id=deployment_id,
                 blueprint_id=blueprint_id,
                 type=raw_node['type'],
                 type_hierarchy=raw_node['type_hierarchy'],
-                number_of_instances=num_instances,
-                planned_number_of_instances=num_instances,
-                deploy_number_of_instances=num_instances,
+                number_of_instances=scalable['current_instances'],
+                planned_number_of_instances=scalable['current_instances'],
+                deploy_number_of_instances=scalable['default_instances'],
+                min_number_of_instances=scalable['min_instances'],
+                max_number_of_instances=scalable['max_instances'],
                 host_id=raw_node['host_id'] if 'host_id' in raw_node else None,
                 properties=raw_node['properties'],
                 operations=raw_node['operations'],
