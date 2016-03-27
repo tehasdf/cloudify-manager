@@ -492,7 +492,7 @@ class BlueprintsManager(object):
                                       modified_nodes,
                                       context):
         # verify deployment exists
-        self.sm.get_deployment(deployment_id, include=['id'])
+        deployment = self.sm.get_deployment(deployment_id, include=['id'])
 
         deployment_id_filter = self.create_filters_dict(
             deployment_id=deployment_id)
@@ -517,7 +517,8 @@ class BlueprintsManager(object):
         node_instances_modification = tasks.modify_deployment(
             nodes=nodes,
             previous_node_instances=node_instances,
-            modified_nodes=modified_nodes)
+            modified_nodes=modified_nodes,
+            deployment=deployment.to_dict())
 
         node_instances_modification['before_modification'] = [
             instance.to_dict() for instance in
