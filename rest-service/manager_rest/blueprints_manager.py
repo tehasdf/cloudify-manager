@@ -473,7 +473,6 @@ class BlueprintsManager(object):
             policy_types=deployment_plan['policy_types'],
             policy_triggers=deployment_plan['policy_triggers'],
             groups=deployment_plan['groups'],
-            policies=deployment_plan['policies'],
             outputs=deployment_plan['outputs'])
 
         self.sm.put_deployment(deployment_id, new_deployment)

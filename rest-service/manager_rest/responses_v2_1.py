@@ -18,21 +18,7 @@ from flask_restful_swagger import swagger
 
 from manager_rest.responses import (Deployment as DeploymentV1,
                                     Node as NodeV1,
-                                    NodeInstance as NodeInstanceV1,
-                                    Workflow)
-
-
-@swagger.model
-@swagger.nested(workflows=Workflow.__name__)
-class Deployment(DeploymentV1):
-
-    resource_fields = dict(DeploymentV1.resource_fields.items() + {
-        'policies': fields.Raw,
-    }.items())
-
-    def __init__(self, **kwargs):
-        super(Deployment, self).__init__(**kwargs)
-        self.policies = kwargs['policies']
+                                    NodeInstance as NodeInstanceV1)
 
 
 @swagger.model
