@@ -47,6 +47,10 @@ def create(policy_types=None,
     policy_triggers = policy_triggers or {}
 
     _process_types_and_triggers(groups, policy_types, policy_triggers)
+    
+    if not groups and not policy_triggers and not policy_types:
+        return
+
     deployment_config_dir_path = _deployment_config_dir()
     if not os.path.isdir(deployment_config_dir_path):
         os.makedirs(deployment_config_dir_path)
