@@ -1,19 +1,12 @@
 tosca_definitions_version: 'cloudify_dsl_1_2'
 
 imports:
-  - http://www.getcloudify.org/spec/cloudify/3.4m1/types.yaml
+  - /home/maxim/dev/repos/cloudify-manager/resources/rest-service/cloudify/types/types.yaml
 
 description: >
   Micro web sites hosting.
 
-relationships:                            # New relationship type
-  new_relationship_type:
-    derived_from: cloudify.relationships.connected_to
-    target_interfaces:
-      cloudify.interfaces.relationship_lifecycle:
-        preconfigure: scripts/remote_increment.sh
-        postconfigure: scripts/remote_increment.sh
-        establish: scripts/remote_increment.sh
+relationships:
   old_relationship_type:                  # Old relationship type
     derived_from: cloudify.relationships.contained_in
     source_interfaces:
@@ -21,6 +14,14 @@ relationships:                            # New relationship type
         preconfigure: scripts/increment.sh
         postconfigure: scripts/increment.sh
         establish: scripts/increment.sh
+  new_relationship_type:                  # New relationship type
+    derived_from: cloudify.relationships.connected_to
+    target_interfaces:
+      cloudify.interfaces.relationship_lifecycle:
+        preconfigure: scripts/remote_increment.sh
+        postconfigure: scripts/remote_increment.sh
+        establish: scripts/remote_increment.sh
+        unlink: scripts/touch.sh
 
 node_templates:
   server:

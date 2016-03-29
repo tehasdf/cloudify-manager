@@ -13,6 +13,7 @@
 #    * See the License for the specific language governing permissions and
 #    * limitations under the License.
 import uuid
+import threading
 
 from datetime import datetime
 from flask import current_app
@@ -107,14 +108,15 @@ class DeploymentUpdateManager(object):
             raise manager_exceptions.UnknownModificationStageError(
                     "entity id {} doesn't exist".format(entity_id))
 
-    @staticmethod
-    def _add_node(dep_update, entity_id):
+    def _add_node(self, dep_update, entity_id):
         get_blueprints_manager()._create_deployment_nodes(
                 deployment_id=dep_update.deployment_id,
                 blueprint_id='N/A',
                 plan=dep_update.blueprint,
                 node_ids=entity_id
         )
+
+        return self.sm.get_node(dep_update.deployment_id, entity_id)
 
     def _add_relationship(self, dep_update, entity_id):
         source_node_id, target_node_id = entity_id.split(':')
@@ -158,29 +160,67 @@ class DeploymentUpdateManager(object):
                             node_id=target_node_id,
                             changes=target_changes)
 
+        return self.sm.get_node(dep_update.deployment_id, source_node_id)
+
+    def _retrieve_modified_node(self, dep_update, entity_id):
+        source_node_id, target_node_id = entity_id.split(':')
+        node = self.sm.get_node(dep_update.deployment_id, source_node_id)
+
+        modified_relationship = [r for r in node.relationships
+                                 if r['target_id'] == target_node_id][0]
+
+        node.relationships.remove(modified_relationship)
+
+        return node
+
     def _add_entity(self, dep_update, entity_type, entity_id):
 
-        {
+        node = {
             'node': self._add_node,
             'relationship': self._add_relationship
         }[entity_type](dep_update, entity_id)
 
-        return entity_id
+        return entity_id, node
 
-    def _update_nodes(self, dep_update):
+    def _remove_entity(self, dep_update, entity_type, entity_id):
+
+        node = {
+            'node': None,
+            'relationship': self._retrieve_modified_node
+        }[entity_type](dep_update, entity_id)
+
+        return entity_id, node
+
+    def _handle_node_updates(self, dep_update):
+        modified_nodes = []
+        entities_updater = {
+            'add': self._add_entity,
+            'remove': self._remove_entity
+        }
         modified_entities = {
             'node': [],
             'relationship': []
         }
         for step in dep_update.steps:
-            if step.operation == 'add':
-                modified_entities[step.entity_type].append(step.entity_id)
-                self._add_entity(dep_update,
-                                 step.entity_type,
-                                 step.entity_id)
-        return modified_entities
+            entity_id, affected_node = \
+                entities_updater[step.operation](dep_update,
+                                                 step.entity_type,
+                                                 step.entity_id)
+            modified_nodes.append(affected_node.to_dict())
+            modified_entities[step.entity_type].append(entity_id)
 
-    def _extract_changes(self, dep_update):
+        all_nodes = [n.to_dict() for n in self.sm.get_nodes(filters={
+            'deployment_id': dep_update.deployment_id}
+        ).items]
+
+        modified_node_ids = _extract_node_instance_ids(modified_nodes)
+
+        modified_nodes.extend([n for n in all_nodes
+                               if n['id'] not in modified_node_ids])
+
+        return modified_entities, modified_nodes
+
+    def _extract_changes(self, dep_update, modified_nodes):
         deployment_id_filter = \
             {'deployment_id': dep_update.deployment_id}
 
@@ -189,19 +229,14 @@ class DeploymentUpdateManager(object):
             [instance.to_dict() for instance in
              self.sm.get_node_instances(filters=deployment_id_filter).items]
 
-        # By this point the nodes should be updated
-        nodes = [node.to_dict() for node in
-                 self.sm.get_nodes(filters=deployment_id_filter).items]
-
         # project changes in deployment
-        return tasks.modify_deployment(nodes=nodes,
+        return tasks.modify_deployment(nodes=modified_nodes,
                                        previous_node_instances=node_instances,
                                        modified_nodes=())
 
     def _update_node_instance(self, node_instance):
         current = self.sm.get_node_instance(node_instance['id'])
-        new_relationships = current.relationships
-        new_relationships += node_instance['relationships']
+        new_relationships = node_instance['relationships']
         self.sm.update_node_instance(models.DeploymentNodeInstance(
                 id=node_instance['id'],
                 relationships=new_relationships,
@@ -233,6 +268,21 @@ class DeploymentUpdateManager(object):
             'related': added_related_raw_instances
         }
 
+    def _apply_node_instance_relationship_removing(self, instances, *_):
+        modified_raw_instances = []
+        modify_related_raw_instances = []
+
+        for node_instance in instances:
+            if node_instance.get('modification') == 'modified':
+                modified_raw_instances.append(node_instance)
+            else:
+                modify_related_raw_instances.append(node_instance)
+
+        return {
+            'affected': modified_raw_instances,
+            'related': modify_related_raw_instances
+        }
+
     def _apply_node_instance_relationship_adding(self, instances, *_):
         modified_raw_instances = []
         modify_related_raw_instances = []
@@ -249,12 +299,15 @@ class DeploymentUpdateManager(object):
                     'related': modify_related_raw_instances
                 }
 
-    def _apply_entity_instance_adding(self, dep_update, updated_instances):
+    def _handle_node_instances_updates(self, dep_update,
+                                       updated_instances):
         instance_update_mapper = {
             'added_and_related':
                 self._apply_node_instance_adding,
-            'modified_and_related':
+            'extended_and_related':
                 self._apply_node_instance_relationship_adding,
+            'reduced_and_related':
+                self._apply_node_instance_relationship_removing
         }
 
         raw_instances = {k: {} for k, _ in instance_update_mapper.iteritems()}
@@ -269,25 +322,97 @@ class DeploymentUpdateManager(object):
     def _execute_update_workflow(self,
                                  dep_update,
                                  node_instances,
-                                 modified_entities):
+                                 modified_entity_ids):
+
+        added_instances = node_instances['added_and_related']
+        extended_instances = node_instances['extended_and_related']
+        reduced_instances = node_instances['reduced_and_related']
+        deleted_instances = node_instances['deleted_and_related']
 
         instance_ids = {
-            'added_instance_ids': _extract_node_instance_ids(
-                node_instances['added_and_related'].get('affected')),
-            'add_related_instance_ids': _extract_node_instance_ids(
-                node_instances['added_and_related'].get('related')),
-            'modified_instance_ids': _extract_node_instance_ids(
-                node_instances['modified_and_related'].get('affected')),
-            'modified_entity_ids': modified_entities,
-            'modify_related_instance_ids': _extract_node_instance_ids(
-                node_instances['modified_and_related'].get('related'))
+            # needed in order to finalize the commit
+            'update_id': dep_update.id,
+
+            'added_instance_ids':
+                _extract_node_instance_ids(added_instances.get('affected')),
+            'add_related_instance_ids':
+                _extract_node_instance_ids(added_instances.get('related')),
+
+            'modified_entity_ids': modified_entity_ids,
+
+            'extended_instance_ids':
+                _extract_node_instance_ids(extended_instances.get('affected')),
+            'extend_related_instance_ids':
+                _extract_node_instance_ids(extended_instances.get('related')),
+
+            'reduced_instance_ids':
+                _extract_node_instance_ids(reduced_instances.get('affected')),
+            'reduce_related_instance_ids':
+                _extract_node_instance_ids(reduced_instances.get('related')),
+
             # TODO: support for different types should be added right here
-            # 'removed_instance_ids': (),
-            # 'remove_related_instnce_ids': ()
+            'removed_instance_ids':
+                _extract_node_instance_ids(deleted_instances.get('affected')),
+            'remove_related_instnce_ids':
+                _extract_node_instance_ids(deleted_instances.get('related'))
         }
-        self.execute_workflow(deployment_id=dep_update.deployment_id,
-                              workflow_id='update',
-                              parameters=instance_ids)
+
+        return self.execute_workflow(deployment_id=dep_update.deployment_id,
+                                     workflow_id='update',
+                                     parameters=instance_ids)
+
+    def finalize_update(self, deployment_update_id):
+
+        dep_update = self.sm.get_deployment_update(deployment_update_id)
+        modified_nodes = dep_update.modified_nodes
+        modified_node_instances = dep_update.modified_node_instances
+
+        self._finalize_nodes(dep_update,
+                             modified_nodes,
+                             modified_node_instances)
+
+        self._finalize_node_instances(modified_node_instances)
+
+        # mark deployment update as committed
+        dep_update.state = models.DeploymentUpdate.COMMITTED
+        self.sm.update_deployment_update(dep_update)
+
+        return models.DeploymentUpdate(deployment_update_id,
+                                       dep_update.blueprint)
+
+    def _finalize_nodes(self,
+                        dep_update,
+                        modified_nodes,
+                        modified_node_instances):
+        reduced_node_instances = \
+            modified_node_instances['reduced_and_related'].get('affected', [])
+        deleted_node_instances = \
+            modified_node_instances['deleted_and_related'].get('affected', [])
+
+        for reduced_node_instance in reduced_node_instances:
+            node = [n for n in modified_nodes
+                    if n['id'] == reduced_node_instance['node_id']][0]
+            self.sm.update_node(deployment_id=dep_update.deployment_id,
+                                node_id=reduced_node_instance['node_id'],
+                                changes=node)
+
+        for deleted_node_instance in deleted_node_instances:
+            node = [n for n in modified_nodes
+                    if n['id'] == deleted_node_instance['node_id']][0]
+            self.sm.delete_node(node['id'])
+
+    def _finalize_node_instances(self,
+                                 modified_node_instances):
+        reduced_node_instances = \
+            modified_node_instances['reduced_and_related'].get('affected', [])
+        deleted_node_instances = \
+            modified_node_instances['deleted_and_related'].get('affected', [])
+
+        for reduced_node_instance in reduced_node_instances:
+            self._update_node_instance(reduced_node_instance)
+
+        for deleted_node_instance in deleted_node_instances:
+            self.sm.delete_node_instance(deleted_node_instance['id'])
 
     def commit_deployment_update(self, deployment_update_id):
         dep_update = self.sm.get_deployment_update(deployment_update_id)
@@ -297,23 +422,32 @@ class DeploymentUpdateManager(object):
         self.sm.update_deployment_update(dep_update)
 
         # Update the nodes on the storage
-        modified_entities = self._update_nodes(dep_update)
+        modified_entity_ids, raw_nodes = \
+            self._handle_node_updates(dep_update)
 
-        # Extract changes from updated notes
-        changes = self._extract_changes(dep_update)
+        # Extract changes from raw nodes
+        node_instance_changes = self._extract_changes(dep_update, raw_nodes)
 
-        # Update node instances according to the changes
+        # Create (and update for adding step type) node instances
+        # according to the changes in raw_nodes
         raw_node_instances = \
-            self._apply_entity_instance_adding(dep_update, changes)
+            self._handle_node_instances_updates(dep_update,
+                                                node_instance_changes)
 
-        # execute update workflow using added and related instances
+        # Saving the needed changes back to sm for future use
+        # (removing entities).
+        dep_update.modified_nodes = raw_nodes
+        dep_update.modified_node_instances = raw_node_instances
+        self.sm.update_deployment_update(dep_update)
+
+        # Execute update workflow using added and related instances
+        # This workflow will call a finalize_update, since removing entities
+        # should be done after the executions.
+        # The raw_node_instances are being used only for their ids, Thus
+        # They should really hold the finished version for the node instance.
         self._execute_update_workflow(dep_update,
                                       raw_node_instances,
-                                      modified_entities)
-
-        # mark deployment update as committed
-        dep_update.state = models.DeploymentUpdate.COMMITTED
-        self.sm.update_deployment_update(dep_update)
+                                      modified_entity_ids)
 
         return models.DeploymentUpdate(deployment_update_id,
                                        dep_update.blueprint)
