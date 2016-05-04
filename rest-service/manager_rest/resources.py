@@ -1353,5 +1353,8 @@ class RunSystemWorkflow(SecuredResource):
     def get(self):
         resp = get_blueprints_manager()._execute_system_workflow(
             wf_id='elo',
-            task_mapping='cloudify_system_workflows.chuj.elo')
+            task_mapping='manager_rest.resources.costam')
         return resp
+
+def costam(ctx):
+    raise RuntimeError(42)
