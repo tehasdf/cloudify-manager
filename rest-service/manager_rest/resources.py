@@ -1347,3 +1347,11 @@ class Tokens(SecuredResource):
 
         token = app.auth_token_generator.generate_auth_token()
         return dict(value=token)
+
+
+class RunSystemWorkflow(SecuredResource):
+    def get(self):
+        resp = get_blueprints_manager()._execute_system_workflow(
+            wf_id='elo',
+            task_mapping='cloudify_system_workflows.chuj.elo')
+        return resp

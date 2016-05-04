@@ -63,7 +63,8 @@ def setup_resources(api):
         'DeploymentUpdateCommit':
             'deployment-updates/<string:update_id>/commit',
         'DeploymentUpdateFinalizeCommit':
-            'deployment-updates/<string:update_id>/finalize_commit'
+            'deployment-updates/<string:update_id>/finalize_commit',
+        'RunSystemWorkflow': 'system-workflow'
     }
 
     for resource, endpoint_suffix in resources_endpoints.iteritems():
