@@ -1355,4 +1355,4 @@ class RunSystemWorkflow(SecuredResource):
             wf_id='elo',
             task_mapping='chuj.dupa')
         get_storage_manager().delete_execution(execution.id)
-        return dict(execution)
+        return execution.to_dict()
