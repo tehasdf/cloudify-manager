@@ -1357,4 +1357,5 @@ class RunSystemWorkflow(SecuredResource):
         return resp
 
 def costam(ctx):
+    print 'ctx', ctx
     raise RuntimeError(42)
