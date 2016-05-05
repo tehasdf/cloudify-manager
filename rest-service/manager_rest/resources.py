@@ -1353,5 +1353,10 @@ class RunSystemWorkflow(SecuredResource):
     def get(self):
         task, execution = get_blueprints_manager()._execute_system_workflow(
             wf_id='elo',
-            task_mapping='chuj.dupa')
+            task_mapping='manager_rest.resources.validate')
         return execution.to_dict()
+
+
+
+def validate(ctx):
+    raise RuntimeError(42)
