@@ -1351,11 +1351,8 @@ class Tokens(SecuredResource):
 
 class RunSystemWorkflow(SecuredResource):
     def get(self):
-        resp = get_blueprints_manager()._execute_system_workflow(
+        task, execution = get_blueprints_manager()._execute_system_workflow(
             wf_id='elo',
-            task_mapping='manager_rest.resources.costam')
-        return resp
-
-def costam(ctx):
-    print 'ctx', ctx
-    raise RuntimeError(42)
+            task_mapping='chuj.dupa')
+        get_storage_manager().delete_execution(execution.id)
+        return dict(execution)
