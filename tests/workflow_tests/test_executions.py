@@ -162,19 +162,27 @@ class ExecutionsTest(TestCase):
         execution = self.client.executions.get(execution_id)
         self.assertEquals(Execution.TERMINATED, execution.status)
 
-        self.es_db_client.update_execution_status(
-            execution_id, 'new-status', '')
+        # Manually updating the status, because the client checks for
+        # correct transitions
+        self.postgresql.run_query(
+            "UPDATE executions SET status='{0}' WHERE id='{1}'".format(
+                'started',  # Has to be a valid status - the column is an enum
+                execution_id
+            ),
+            db_name='cloudify'
+        )
+
         execution = self.client.executions.get(execution_id)
-        self.assertEquals('new-status', execution.status)
+        self.assertEquals('started', execution.status)
         execution = self.client.executions.update(execution_id,
-                                                  'another-new-status',
+                                                  'pending',
                                                   'some-error')
-        self.assertEquals('another-new-status', execution.status)
+        self.assertEquals('pending', execution.status)
         self.assertEquals('some-error', execution.error)
         # verifying that updating only the status field also resets the
         # error field to an empty string
-        execution = self.client.executions.update(execution_id, 'final-status')
-        self.assertEquals('final-status', execution.status)
+        execution = self.client.executions.update(execution_id, 'terminated')
+        self.assertEquals('terminated', execution.status)
         self.assertEquals('', execution.error)
 
     def _execute_and_cancel_execution(self, workflow_id, force=False,

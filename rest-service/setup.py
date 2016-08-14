@@ -23,7 +23,8 @@ setup(
     author='Dan Kilman',
     author_email='dank@gigaspaces.com',
     packages=['manager_rest',
-              'manager_rest.deployment_update'],
+              'manager_rest.deployment_update',
+              'manager_rest.storage'],
     package_data={'manager_rest': ['VERSION']},
     license='LICENSE',
     description='Cloudify manager rest service',
@@ -44,6 +45,8 @@ setup(
         'flask-securest==0.8',
         'psutil==3.3.0',
         'jsonpickle==0.9.2',
-        'wagon==0.3.2'
+        'wagon==0.3.2',
+        'Flask-SQLAlchemy==2.1',
+        'psycopg2==2.6.2'
     ]
 )

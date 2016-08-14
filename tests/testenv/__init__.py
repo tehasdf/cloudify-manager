@@ -34,6 +34,7 @@ from cloudify_cli.colorful_event import ColorfulEvent
 from testenv import utils
 from testenv import docl
 from testenv.services import elastic
+from testenv.services.postgresql import posrgresql
 
 logger = cloudify.utils.setup_logger('TESTENV')
 cloudify.utils.setup_logger('cloudify.rest_client', logging.INFO)
@@ -56,6 +57,8 @@ class BaseTestCase(unittest.TestCase):
                                                   logging.INFO)
         self.client = utils.create_rest_client()
         self.es_db_client = utils.create_es_db_client()
+        self.postgresql = postgresql
+        self.postgresql.create_db()
 
     def tearDown(self):
         self.env.stop_dispatch_processes()

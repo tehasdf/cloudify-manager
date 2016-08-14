@@ -134,7 +134,7 @@ class DeploymentPlan(dict):
     @classmethod
     def from_storage(cls, deployment_id):
         """ Create a DeploymentPlan from a stored deployment"""
-        sm = manager_rest.storage_manager.get_storage_manager()
+        sm = manager_rest.storage.storage_manager.get_storage_manager()
         # get deployment from storage
         deployment = sm.get_deployment(deployment_id)
 
@@ -149,7 +149,7 @@ class DeploymentPlan(dict):
             blueprint_plan['workflow_plugins_to_install']
 
         # get the nodes from the storage
-        nodes = sm.get_nodes(
+        nodes = sm.list_nodes(
             filters={'deployment_id': [deployment_id]}).items
 
         return cls(deployment, nodes, deployment_plugins_to_install,

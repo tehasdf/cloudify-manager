@@ -35,7 +35,7 @@ from celery import Celery
 from cloudify.utils import setup_logger
 from cloudify_rest_client import CloudifyClient
 from cloudify_rest_client.executions import Execution
-from manager_rest.es_storage_manager import ESStorageManager
+from manager_rest.storage.es_storage_manager import ESStorageManager
 
 from testenv import constants
 
@@ -341,9 +341,8 @@ def publish_event(queue,
 
 
 def delete_provider_context():
-    requests.delete('http://{0}:9200'
-                    '/cloudify_storage/provider_context/CONTEXT'
-                    .format(get_manager_ip()))
+    from testenv.processes.postgresql import postgresql
+    postgresql.run_query("DELETE from provider_context", 'cloudify')
 
 
 def restore_provider_context():

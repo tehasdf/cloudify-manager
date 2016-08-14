@@ -27,6 +27,7 @@ class TestStorage(TestCase):
     def test_update_node_bad_version(self):
         deploy(resource("dsl/basic.yaml"))
         client = create_rest_client()
+        # TODO: Is this still relevant with Postgres?
         instance = client.node_instances.list()[0]
         instance = client.node_instances.get(instance.id)  # need the version
 

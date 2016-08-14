@@ -21,6 +21,10 @@ class Config(object):
     def __init__(self):
         self._db_address = 'localhost'
         self._db_port = 9200
+        # TODO: Remove after merge with new manager blueprint code
+        self.postgresql_db_name = 'cloudify'
+        self.postgresql_username = 'cloudify'
+        self.postgresql_password = 'cloudify'
         self._amqp_address = 'localhost'
         self.amqp_username = 'guest'
         self.amqp_password = 'guest'
