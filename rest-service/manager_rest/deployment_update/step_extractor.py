@@ -18,6 +18,7 @@ import networkx as nx
 
 import manager_rest.blueprints_manager
 import manager_rest.models
+from manager_rest.storage.storage_manager import get_storage_manager
 
 
 RELEVANT_DEPLOYMENT_FIELDS = ['blueprint_id', 'id', 'inputs', 'nodes',
@@ -134,7 +135,7 @@ class DeploymentPlan(dict):
     @classmethod
     def from_storage(cls, deployment_id):
         """ Create a DeploymentPlan from a stored deployment"""
-        sm = manager_rest.storage.storage_manager.get_storage_manager()
+        sm = get_storage_manager()
         # get deployment from storage
         deployment = sm.get_deployment(deployment_id)
 

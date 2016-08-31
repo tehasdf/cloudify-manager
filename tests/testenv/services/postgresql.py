@@ -26,28 +26,31 @@ logger = setup_logger('postgresql', logging.INFO)
 setup_logger('postgresql.trace', logging.INFO)
 
 
-def _run_query(query):
-    with closing(pg8000.connect(database='postgres',
+def run_query(query, db_name='postgres'):
+    with closing(pg8000.connect(database=db_name,
                                 user='cloudify',
                                 password='cloudify',
                                 host=utils.get_manager_ip())) as con:
         con.autocommit = True
-        with closing(con.cursor()) as cur:
-            cur.execute(query)
-            logger.info('Running: {0}'.format(query))
-            status_message = cur.description
+        with con.cursor() as cur:
             try:
+                cur.execute(query)
+                logger.info('Running: ' + cur.query)
+                status_message = cur.statusmessage
                 fetchall = cur.fetchall()
-            except:
+            except Exception, e:
                 fetchall = None
+                status_message = str(e)
             return {'status': status_message, 'all': fetchall}
 
 
-def create_db(db_name):
-    query = "SELECT 1 from pg_database WHERE datname='{0}'".format(db_name)
-    result = _run_query(query)
+def create_db(db_name='cloudify'):
+    query = "SELECT 1 from pg_database WHERE datname='{0}'".\
+        format(db_name)
+    result = run_query(query)
     db_exist = '1' in result['status']
     if db_exist:
-        logger.info('database {0} exist, going to delete it!'.format(db_name))
-    _run_query('DROP DATABASE IF EXISTS {0}'.format(db_name))
-    _run_query('CREATE DATABASE {0}'.format(db_name))
+        logger.info('database {0} exist, going to delete it!'.
+                    format(db_name))
+    run_query('DROP DATABASE IF EXISTS ' + db_name)
+    run_query('CREATE DATABASE ' + db_name)

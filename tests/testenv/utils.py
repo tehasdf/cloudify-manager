@@ -26,7 +26,6 @@ from functools import wraps
 from multiprocessing import Process
 
 import elasticsearch
-import requests
 import pika
 import sh
 from wagon import wagon
@@ -341,8 +340,8 @@ def publish_event(queue,
 
 
 def delete_provider_context():
-    from testenv.processes.postgresql import postgresql
-    postgresql.run_query("DELETE from provider_context", 'cloudify')
+    from testenv.services.postgresql import run_query
+    run_query("DELETE from provider_context", 'cloudify')
 
 
 def restore_provider_context():
