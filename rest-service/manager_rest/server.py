@@ -107,7 +107,7 @@ def setup_app(warnings=None):
     endpoint_mapper.setup_resources(api)
 
     app.config['SQLALCHEMY_DATABASE_URI'] = \
-        'postgresql://{0}:{1}@localhost/{2}'.format(
+        'postgresql://{0}:{1}@localhost:25432/{2}'.format(
             cfy_config.postgresql_username,
             cfy_config.postgresql_password,
             cfy_config.postgresql_db_name
