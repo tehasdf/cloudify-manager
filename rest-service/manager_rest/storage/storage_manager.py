@@ -38,6 +38,7 @@ TABLE_LOCK_STR = 'LOCK TABLE {0} IN ACCESS EXCLUSIVE MODE;'
 
 
 def _close_session(f):
+    return f
     @wraps(f)
     def wrapper(*args, **kwargs):
         try:

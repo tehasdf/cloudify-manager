@@ -159,13 +159,18 @@ class BaseServerTestCase(unittest.TestCase):
         self.server_configuration = self.create_configuration()
         server.SQL_DIALECT = 'sqlite'
         server.reset_app(self.server_configuration)
+
+        self._ctx = server.app.test_request_context()
+        self._ctx.push()
+        self.addCleanup(self._ctx.pop)
+
         utils.copy_resources(config.instance.file_server_root)
         server.db.create_all()
         self._add_users_and_roles(server.user_datastore)
-        self.app = self._get_app(server.app)
-        self.client = self.create_client()
         self.sm = get_storage_manager()
         self.initialize_provider_context()
+        self.app = self._get_app(server.app)
+        self.client = self.create_client()
 
     @staticmethod
     def _get_app(flask_app):

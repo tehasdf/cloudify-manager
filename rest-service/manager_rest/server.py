@@ -53,7 +53,6 @@ class CloudifyFlaskApp(Flask):
         self._set_sql_alchemy()
         self._set_flask_security()
 
-        self.app_context().push()  # Set the app's context globally
         setup_resources(Api(self))
 
     def _set_flask_security(self):
@@ -85,8 +84,7 @@ class CloudifyFlaskApp(Flask):
                 cfy_config.postgresql_db_name
             )
         self.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-        with self.app_context():
-            db.init_app(self)  # Set the app to use the SQLAlchemy DB
+        db.init_app(self)  # Set the app to use the SQLAlchemy DB
 
     def _set_exception_handlers(self):
         """Set custom exception handlers for the Flask app
