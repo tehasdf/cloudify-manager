@@ -14,26 +14,43 @@
 #  * limitations under the License.
 #
 
-from flask import request
+from functools import wraps
+
+from flask import current_app, request
 from flask_security import current_user
 
 from manager_rest.storage import models
+from manager_rest.utils import abort_error
 from manager_rest.security import SecuredResource
 from manager_rest.resources import (marshal_with,
-                                    exceptions_handled)
+                                    exceptions_handled,
+                                    MISSING_PREMIUM_PACKAGE_MESSAGE)
+from manager_rest.responses_v2 import Execution
 from manager_rest.resources_v2 import (create_filters,
                                        paginate,
                                        sortable,
                                        verify_json_content_type,
                                        verify_parameter_in_request_body)
+from manager_rest.manager_exceptions import MissingPremiumPackage
+
 try:
     from cloudify_premium import (TenantResponse,
                                   GroupResponse,
                                   UserResponse,
                                   SecuredTenantResource)
-except:
+except ImportError:
     TenantResponse, GroupResponse, UserResponse = (None, ) * 3
     SecuredTenantResource = SecuredResource
+
+try:
+    from cloudify_premium.ha.web import (ClusterResourceBase,
+                                         ClusterState,
+                                         ClusterNode)
+    HAS_CLUSTER = True
+except ImportError:
+    HAS_CLUSTER = False
+    ClusterNode, ClusterState = (None, ) * 2
+    ClusterResourceBase = SecuredResource
 
 
 class Tenants(SecuredTenantResource):
@@ -178,3 +195,114 @@ class UserGroupsUsers(SecuredTenantResource):
         verify_parameter_in_request_body('group_name', request_json)
         return multi_tenancy.remove_user_from_group(request_json['username'],
                                                     request_json['group_name'])
+
+
+def cluster_package_required(f):
+    """
+    Abort the request if the premium HA package isn't installed.
+    """
+
+    # a local check is required, because the app-wide condition checks for
+    # the marshal_with parameter being None, and some cluster-related endpoints
+    # use marshal responses that also exist without the premium package
+    # (Execution)
+
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not HAS_CLUSTER:
+            abort_error(MissingPremiumPackage(MISSING_PREMIUM_PACKAGE_MESSAGE),
+                        current_app.logger,
+                        hide_server_message=True)
+        return f(*args, **kwargs)
+    return wrapper
+
+
+class Cluster(ClusterResourceBase):
+    @exceptions_handled
+    @cluster_package_required
+    @marshal_with(ClusterState)
+    @create_filters()
+    def get(self, cluster, _include=None, filters=None):
+        """
+        Current state of the cluster.
+        """
+        return cluster.get_status(_include=_include, filters=None)
+
+    @exceptions_handled
+    @cluster_package_required
+    @marshal_with(Execution)
+    def post(self, cluster):
+        """
+        Start the "create cluster" execution.
+
+        The created cluster will already have one node (the current manager).
+        """
+        verify_json_content_type()
+        request_json = request.get_json()
+        verify_parameter_in_request_body('config', request_json)
+        config = request_json['config']
+        return cluster.start(config)
+
+    @exceptions_handled
+    @cluster_package_required
+    @marshal_with(ClusterState)
+    def patch(self, cluster):
+        """
+        Update the cluster config.
+
+        Use this to change settings or promote a replica machine to master.
+        """
+        verify_json_content_type()
+        request_json = request.get_json()
+        verify_parameter_in_request_body('config', request_json)
+        config = request_json['config']
+        return cluster.update_config(config)
+
+
+class ClusterNodes(ClusterResourceBase):
+    @exceptions_handled
+    @cluster_package_required
+    @marshal_with(ClusterNode)
+    def get(self, cluster):
+        """
+        List the nodes in the current cluster.
+
+        This will also list inactive nodes that weren't deleted. 404 if the
+        cluster isn't created yet.
+        """
+        return cluster.list_nodes()
+
+
+class ClusterNodesId(ClusterResourceBase):
+    @exceptions_handled
+    @cluster_package_required
+    @marshal_with(ClusterNode)
+    def get(self, node_id, cluster):
+        """
+        Details of a node from the cluster.
+        """
+        return cluster.get_node(node_id)
+
+    @exceptions_handled
+    @cluster_package_required
+    @marshal_with(Execution)
+    def put(self, node_id, cluster):
+        """
+        Join the current manager to the cluster.
+        """
+        verify_json_content_type()
+        request_json = request.get_json()
+        verify_parameter_in_request_body('config', request_json)
+        config = request_json['config']
+        return cluster.join(config)
+
+    @exceptions_handled
+    @cluster_package_required
+    @marshal_with(ClusterNode)
+    def delete(self, node_id, cluster):
+        """
+        Remove the node from the cluster.
+
+        Use this when a node is permanently down.
+        """
+        return cluster.remove_node(node_id)
